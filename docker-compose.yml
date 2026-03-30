@@ -1,0 +1,175 @@
+services:
+
+  # ─────────────────────────────────────────
+  # PostgreSQL — single source of truth
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: debtscan-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-debtscan}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-debtscan123}
+      POSTGRES_DB: ${DB_NAME:-debtscan}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-debtscan}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - debtscan-network
+
+  # ─────────────────────────────────────────
+  # SonarQube Community Edition
+  # ─────────────────────────────────────────
+  sonarqube:
+    image: sonarqube:10-community
+    container_name: debtscan-sonarqube
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-debtscan}
+      SONAR_JDBC_USERNAME: ${DB_USER:-debtscan}
+      SONAR_JDBC_PASSWORD: ${DB_PASSWORD:-debtscan123}
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    ports:
+      - "9000:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    networks:
+      - debtscan-network
+
+  # ─────────────────────────────────────────
+  # Scanner — Go + Gin
+  # ─────────────────────────────────────────
+  scanner:
+    build:
+      context: ./scanner
+      dockerfile: Dockerfile
+    container_name: debtscan-scanner
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      intelligence:
+        condition: service_healthy
+      sonarqube:
+        condition: service_started   # sonarqube takes 2+ min to boot, scanner retries internally
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-debtscan}
+      DB_PASSWORD: ${DB_PASSWORD:-debtscan123}
+      DB: ${DB_NAME:-debtscan}
+      SONARQUBE_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      SEMGREP_RULES: ${SEMGREP_RULES:-auto}
+      SEMGREP_APP_TOKEN: ${SEMGREP_APP_TOKEN:-}
+      SCAN_CRON_ENABLED: ${SCAN_CRON_ENABLED:-true}
+      SCAN_CRON_SCHEDULE: ${SCAN_CRON_SCHEDULE:-0 3 * * *}
+      INTELLIGENCE_URL: http://intelligence:8000
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - scanner_temp:/app/temp_unified_scans
+    networks:
+      - debtscan-network
+
+  # ─────────────────────────────────────────
+  # Intelligence — Python + FastAPI
+  # ─────────────────────────────────────────
+  intelligence:
+    build:
+      context: ./intelligence
+      dockerfile: Dockerfile
+    container_name: debtscan-intelligence
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-debtscan}
+      DB_PASSWORD: ${DB_PASSWORD:-debtscan123}
+      DB_NAME: ${DB_NAME:-debtscan}
+      SCANNER_URL: http://scanner:5000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - debtscan-network
+
+  # ─────────────────────────────────────────
+  # Dashboard — React + TypeScript
+  # ─────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: debtscan-dashboard
+    restart: unless-stopped
+    depends_on:
+      scanner:
+        condition: service_healthy
+      intelligence:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000 > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - debtscan-network
+
+# ─────────────────────────────────────────
+# Volumes
+# ─────────────────────────────────────────
+volumes:
+  postgres_data:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  scanner_temp:
+
+# ─────────────────────────────────────────
+# Network
+# ─────────────────────────────────────────
+networks:
+  debtscan-network:
+    driver: bridge

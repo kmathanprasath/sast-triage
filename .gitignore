@@ -1,0 +1,12 @@
+.env
+*.env
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+dist/
+.DS_Store
+temp_unified_scans/
+*.log
+scanner/go.sum
+.env

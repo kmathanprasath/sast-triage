@@ -1,0 +1,66 @@
+name: DebtScan Self-Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  self-scan:
+    name: Scan DebtScan with DebtScan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep on scanner service
+        uses: docker://returntocorp/semgrep:latest
+        with:
+          args: >
+            semgrep scan
+            --config p/security-audit
+            --json
+            --output semgrep-results.json
+            --no-git-ignore
+            ./scanner
+        continue-on-error: true
+
+      - name: Run Semgrep on intelligence service
+        uses: docker://returntocorp/semgrep:latest
+        with:
+          args: >
+            semgrep scan
+            --config p/security-audit
+            --json
+            --output semgrep-intelligence.json
+            --no-git-ignore
+            ./intelligence
+        continue-on-error: true
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debtscan-self-scan-${{ github.sha }}
+          path: |
+            semgrep-results.json
+            semgrep-intelligence.json
+          retention-days: 30
+
+      - name: Check for CRITICAL findings
+        run: |
+          if [ -f semgrep-results.json ]; then
+            CRITICAL=$(cat semgrep-results.json | python3 -c "
+          import json,sys
+          data = json.load(sys.stdin)
+          critical = [r for r in data.get('results',[])
+                      if r.get('extra',{}).get('severity','').upper() in ['ERROR','CRITICAL']]
+          print(len(critical))
+            ")
+            echo "Critical findings in scanner: $CRITICAL"
+            if [ "$CRITICAL" -gt "0" ]; then
+              echo "⚠ $CRITICAL critical findings found in scanner service"
+            fi
+          fi
