@@ -46,13 +46,15 @@ SAST-Triage/
 - `handlers.go` — HTTP route handlers
 - `semgrep.go` / `sonar.go` — tool integrations
 - `unify.go` — deduplication and finding normalization
+- `types.go` — all request/response types including `ScanRequest` (with optional `token` field for private repos)
 
 **Dashboard (React)**
-- `src/components/DigestReport.tsx` — Overview tab
+- `src/components/DigestReport.tsx` — Overview tab (pattern digest + TP/FP/FN/TN validation)
 - `src/components/DebtTrendChart.tsx` — Debt Trend tab
-- `src/components/AllFindings.tsx` — All Findings tab
-- `src/hooks/useData.ts` — API hooks
+- `src/components/AllFindings.tsx` — All Findings tab (per-file drill-down)
+- `src/hooks/useData.ts` — API hooks (`triggerScan` accepts optional `token` for private repos)
 - `src/utils/exportPdf.ts` — PDF export
+- `src/App.tsx` — ScanModal includes private repo toggle + token input
 
 ## Testing Your Changes
 

@@ -302,7 +302,9 @@ This answers the question teams never ask: "If we ignore this today, how much wo
 | `DB_NAME` | No | PostgreSQL database name (default: `debtscan`) |
 | `SONAR_TOKEN` | Recommended | SonarQube user token — enables SonarQube analysis |
 | `GEMINI_API_KEY` | Optional | Google Gemini API key — enables AI triage with cascade explanations |
-| `GITHUB_TOKEN` | Optional | GitHub PAT — required for private repo scanning |
+| `GITHUB_TOKEN` | Optional | GitHub PAT — required for private GitHub repo scanning. Needs `repo` (read) scope |
+| `GITLAB_TOKEN` | Optional | GitLab Personal Access Token — required for private GitLab repos. Needs `read_repository` scope |
+| `BITBUCKET_TOKEN` | Optional | Bitbucket App Password — required for private Bitbucket repos. Needs `repository` (read) permission |
 | `SEMGREP_RULES` | No | Semgrep ruleset (default: `auto`) |
 | `SEMGREP_APP_TOKEN` | Optional | Semgrep Cloud token for managed rules |
 | `SCAN_CRON_ENABLED` | No | Enable scheduled scanning (default: `true`) |
@@ -338,6 +340,32 @@ This answers the question teams never ask: "If we ignore this today, how much wo
 | PATCH | `/validate/:cluster_id` | Set TP/FP/FN/TN validation status |
 | GET | `/validations/:service` | Get all validation statuses for a service |
 | GET | `/health` | Health check |
+
+---
+
+## Private Repositories
+
+VaultScan supports private repos on GitHub, GitLab, and Bitbucket.
+
+**Option 1 — Per-scan token (dashboard)**
+
+Click "New Scan", toggle on "Private repository", and paste your access token. The token is used only for cloning and never stored.
+
+**Option 2 — Global token (cron scanning)**
+
+Set the token in `.env` so scheduled scans can access private repos automatically:
+
+```env
+GITHUB_TOKEN=ghp_xxxxxxxxxxxx        # GitHub PAT — needs repo (read) scope
+GITLAB_TOKEN=glpat-xxxxxxxxxxxx      # GitLab token — needs read_repository scope
+BITBUCKET_TOKEN=your-app-password    # Bitbucket app password — needs repository (read)
+```
+
+**Where to get tokens**
+
+- GitHub: Settings → Developer settings → Personal access tokens → Fine-grained → `Contents: Read`
+- GitLab: User Settings → Access Tokens → `read_repository`
+- Bitbucket: Personal settings → App passwords → `Repositories: Read`
 
 ---
 
