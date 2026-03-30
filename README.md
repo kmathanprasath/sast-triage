@@ -112,8 +112,8 @@ That's it. No local installs of Go, Python, Node, or Semgrep needed.
 ### 1. Clone
 
 ```bash
-git clone https://github.com/your-username/vaultscan
-cd vaultscan/SAST-Triage
+git clone https://github.com/kmathanprasath/sast-triage
+cd sast-triage/SAST-Triage
 ```
 
 ### 2. Configure
