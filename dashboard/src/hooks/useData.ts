@@ -49,10 +49,11 @@ export function useAllServices() {
   return useFetch<ServiceSummary[]>(`${INTEL}/summary`, [])
 }
 
-export async function triggerScan(repoUrl: string, branch: string) {
-  // Try /scan first, fall back to /microservice register pattern
+export async function triggerScan(repoUrl: string, branch: string, token = '') {
   try {
-    const res = await axios.post(`${SCANNER}/scan`, { repo_url: repoUrl, branch })
+    const payload: Record<string, string> = { repo_url: repoUrl, branch }
+    if (token) payload.token = token
+    const res = await axios.post(`${SCANNER}/scan`, payload)
     return res.data
   } catch (e) {
     if (axios.isAxiosError(e) && e.response?.status === 404) {

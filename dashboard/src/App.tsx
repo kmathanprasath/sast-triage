@@ -41,15 +41,17 @@ function ToastContainer() {
 }
 
 function ScanModal({ onClose, onStarted }: { onClose: () => void; onStarted: (id: string) => void }) {
-  const [repo,   setRepo]   = useState("")
-  const [branch, setBranch] = useState("main")
-  const [busy,   setBusy]   = useState(false)
+  const [repo,      setRepo]      = useState("")
+  const [branch,    setBranch]    = useState("main")
+  const [isPrivate, setIsPrivate] = useState(false)
+  const [token,     setToken]     = useState("")
+  const [busy,      setBusy]      = useState(false)
 
   async function submit() {
     if (!repo.trim()) return
     setBusy(true)
     try {
-      const data = await triggerScan(repo.trim(), branch.trim() || "main")
+      const data = await triggerScan(repo.trim(), branch.trim() || "main", isPrivate ? token.trim() : "")
       const id = data.scan_id ?? data.id ?? data.job_id ?? String(Date.now())
       showToast("Scan queued successfully", "success")
       onStarted(id)
@@ -72,16 +74,51 @@ function ScanModal({ onClose, onStarted }: { onClose: () => void; onStarted: (id
             <label className="form-label">Repository URL</label>
             <input className="form-input" placeholder="https://github.com/org/repo" value={repo}
               onChange={e => setRepo(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} autoFocus />
+            <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>Supports GitHub, GitLab, and Bitbucket</div>
           </div>
           <div className="form-group">
             <label className="form-label">Branch</label>
             <input className="form-input" placeholder="main" value={branch}
               onChange={e => setBranch(e.target.value)} />
           </div>
+          <div className="form-group">
+            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+              <div onClick={() => setIsPrivate(p => !p)} style={{
+                width: 36, height: 20, borderRadius: 10, position: "relative", flexShrink: 0,
+                background: isPrivate ? "var(--gold)" : "var(--surface-3)",
+                border: "1px solid var(--border)", transition: "background 0.2s", cursor: "pointer",
+              }}>
+                <div style={{
+                  position: "absolute", top: 2, left: isPrivate ? 17 : 2,
+                  width: 14, height: 14, borderRadius: "50%",
+                  background: isPrivate ? "#1C2333" : "var(--text-faint)",
+                  transition: "left 0.2s",
+                }} />
+              </div>
+              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Private repository</span>
+            </label>
+          </div>
+          {isPrivate && (
+            <div className="form-group">
+              <label className="form-label">
+                Access Token
+                <span style={{ fontSize: 10, color: "var(--text-faint)", marginLeft: 8, fontWeight: 400 }}>
+                  GitHub PAT · GitLab token · Bitbucket app password
+                </span>
+              </label>
+              <input className="form-input" type="password"
+                placeholder="ghp_xxxx / glpat-xxxx / app-password"
+                value={token} onChange={e => setToken(e.target.value)} />
+              <div style={{ fontSize: 10, color: "var(--text-faint)", marginTop: 4 }}>
+                Used only for cloning. Never stored.
+              </div>
+            </div>
+          )}
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy || !repo.trim()}>
+          <button className="btn btn-primary" onClick={submit}
+            disabled={busy || !repo.trim() || (isPrivate && !token.trim())}>
             {busy ? "Queuing..." : "Start Scan"}
           </button>
         </div>

@@ -53,8 +53,7 @@ const (
 // Enqueue — put scan on goroutine pool
 // ─────────────────────────────────────────
 
-func enqueueScan(scanID, repoURL, branch, projectKey, scanType string) {
-	// Register immediately so /scan/:id returns status right away
+func enqueueScan(scanID, repoURL, branch, projectKey, scanType, token string) {
 	s := &ScanStatus{
 		ID:         scanID,
 		Status:     "queued",
@@ -68,7 +67,7 @@ func enqueueScan(scanID, repoURL, branch, projectKey, scanType string) {
 	scanSemaphore <- struct{}{}
 	go func() {
 		defer func() { <-scanSemaphore }()
-		performScan(scanID, repoURL, branch, projectKey, scanType)
+		performScan(scanID, repoURL, branch, projectKey, scanType, token)
 	}()
 }
 
@@ -76,7 +75,7 @@ func enqueueScan(scanID, repoURL, branch, projectKey, scanType string) {
 // Full scan pipeline
 // ─────────────────────────────────────────
 
-func performScan(scanID, repoURL, branch, projectKey, scanType string) {
+func performScan(scanID, repoURL, branch, projectKey, scanType, token string) {
 	scanDir := filepath.Join(tempDir, scanID)
 	absDir, _ := filepath.Abs(scanDir)
 
@@ -97,7 +96,7 @@ func performScan(scanID, repoURL, branch, projectKey, scanType string) {
 	log.Printf("[%s] Cloning %s @ %s", scanID, repoURL, branch)
 	logs.WriteString(fmt.Sprintf("repo: %s\nbranch: %s\n\n", repoURL, branch))
 
-	if err := cloneRepo(ctx, repoURL, absDir, branch); err != nil {
+	if err := cloneRepo(ctx, repoURL, absDir, branch, token); err != nil {
 		log.Printf("[%s] Clone failed: %v", scanID, err)
 		saveFailed(scanID, projectKey, branch, err)
 		if s, ok := getActiveScan(scanID); ok {
@@ -211,43 +210,79 @@ func notifyIntelligence(microservice, branch string) {
 }
 
 // ─────────────────────────────────────────
-// Clone repo using Docker alpine/git
+// Clone repo — supports GitHub, GitLab, Bitbucket
+// Private repos: inject token into URL credentials
+//   GitHub:    token:token@github.com
+//   GitLab:    oauth2:token@gitlab.com
+//   Bitbucket: x-token-auth:token@bitbucket.org
 // ─────────────────────────────────────────
 
-func cloneRepo(ctx context.Context, repoURL, targetDir, branch string) error {
+func cloneRepo(ctx context.Context, repoURL, targetDir, branch, token string) error {
 	os.MkdirAll(targetDir, 0755)
 
-	// Inject GitHub token for private repos
-	cloneURL := repoURL
-	if githubToken != "" && strings.Contains(repoURL, "github.com") {
-		parsed, _ := url.Parse(repoURL)
-		parsed.User = url.UserPassword("token", githubToken)
-		cloneURL = parsed.String()
+	cloneURL := injectToken(repoURL, token)
+
+	tryClone := func(b string) bool {
+		cmd := exec.CommandContext(ctx, "git", "clone", "-b", b, "--depth", "1", cloneURL, targetDir)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		return cmd.Run() == nil
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "clone", "-b", branch, "--depth", "1", cloneURL, targetDir)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		// Fallback: try "master" then "main" if custom branch not found
-		if branch != "master" {
-			log.Printf("Branch '%s' not found, falling back to 'master'", branch)
-			cmd2 := exec.CommandContext(ctx, "git", "clone", "-b", "master", "--depth", "1", cloneURL, targetDir)
-			if cmd2.Run() == nil {
+	if tryClone(branch) {
+		return nil
+	}
+	// Branch not found — try common defaults
+	for _, fallback := range []string{"master", "main", "develop"} {
+		if fallback != branch {
+			log.Printf("[clone] branch '%s' not found, trying '%s'", branch, fallback)
+			if tryClone(fallback) {
 				return nil
 			}
 		}
-		if branch != "main" {
-			log.Printf("Branch '%s' not found, falling back to 'main'", branch)
-			cmd3 := exec.CommandContext(ctx, "git", "clone", "-b", "main", "--depth", "1", cloneURL, targetDir)
-			if cmd3.Run() == nil {
-				return nil
-			}
-		}
-		return fmt.Errorf("clone failed: %s", stderr.String())
 	}
-	return nil
+	return fmt.Errorf("clone failed: could not find branch '%s' or common fallbacks", branch)
+}
+
+// injectToken builds an authenticated clone URL.
+// Per-scan token takes priority over the global env token.
+func injectToken(repoURL, perScanToken string) string {
+	parsed, err := url.Parse(repoURL)
+	if err != nil {
+		return repoURL
+	}
+
+	// Resolve which token to use
+	token := perScanToken
+	if token == "" {
+		switch {
+		case strings.Contains(parsed.Host, "github.com"):
+			token = githubToken
+		case strings.Contains(parsed.Host, "gitlab.com"):
+			token = os.Getenv("GITLAB_TOKEN")
+		case strings.Contains(parsed.Host, "bitbucket.org"):
+			token = os.Getenv("BITBUCKET_TOKEN")
+		}
+	}
+
+	if token == "" {
+		return repoURL // public repo — no auth needed
+	}
+
+	// Inject credentials in the format each provider expects
+	switch {
+	case strings.Contains(parsed.Host, "github.com"):
+		parsed.User = url.UserPassword("token", token)
+	case strings.Contains(parsed.Host, "gitlab.com"):
+		parsed.User = url.UserPassword("oauth2", token)
+	case strings.Contains(parsed.Host, "bitbucket.org"):
+		parsed.User = url.UserPassword("x-token-auth", token)
+	default:
+		// Generic: try basic auth with token as password
+		parsed.User = url.UserPassword("git", token)
+	}
+
+	return parsed.String()
 }
 
 // ─────────────────────────────────────────
@@ -279,7 +314,7 @@ func scheduledMainBranchScan() {
 	for _, ms := range microservices {
 		scanID := newUUID()
 		projectKey := sanitizeProjectKey(ms.Name)
-		enqueueScan(scanID, ms.SourceRepoURL, defaultBranch, projectKey, "cron")
+		enqueueScan(scanID, ms.SourceRepoURL, defaultBranch, projectKey, "cron", "")
 		log.Printf("  Queued: %s", ms.Name)
 		time.Sleep(2 * time.Second) // stagger to avoid Docker rate limits
 	}

@@ -22,6 +22,7 @@ type MicroserviceRecord struct {
 type ScanRequest struct {
 	RepoURL string `json:"repo_url" binding:"required"`
 	Branch  string `json:"branch"   binding:"required"`
+	Token   string `json:"token"`    // optional — overrides env token for this scan
 }
 
 type ScanStatus struct {

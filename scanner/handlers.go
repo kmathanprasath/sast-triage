@@ -32,7 +32,7 @@ func handleStartScan(c *gin.Context) {
 	scanID := newUUID()
 	projectKey := generateProjectKey(req.RepoURL)
 
-	enqueueScan(scanID, req.RepoURL, req.Branch, projectKey, "manual")
+	enqueueScan(scanID, req.RepoURL, req.Branch, projectKey, "manual", req.Token)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"scan_id":     scanID,
