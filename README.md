@@ -1,6 +1,6 @@
 # VaultScan
 
-> SAST tools give you 454 findings. VaultScan tells you the 6 patterns causing all of them — and exactly how to fix each one so it cascades everywhere.
+> SAST tools give you 454 findings. VaultScan tells you the 6 patterns causing all of them and exactly how to fix each one so it cascades everywhere.
 
 ---
 
